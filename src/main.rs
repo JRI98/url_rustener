@@ -1,5 +1,3 @@
-// URL shortener with stats and automatic deletion if unused for 7 days
-
 mod server;
 
 use std::env;
