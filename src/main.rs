@@ -1,12 +1,12 @@
 mod server;
 
-use std::env;
-
 use axum::{
     routing::{delete, get, patch, post},
     Router,
 };
 use server::{AppState, Routes};
+use std::env;
+use tracing::info;
 
 #[tokio::main]
 async fn main() {
@@ -15,7 +15,8 @@ async fn main() {
         .with_target(false)
         .init();
 
-    let shared_state = AppState::new().expect("Could not create shared state");
+    let redis_url = &env::var("REDIS_URL").unwrap_or("redis://127.0.0.1".to_string());
+    let shared_state = AppState::new(redis_url).expect("Could not create shared state");
 
     let app = Router::new()
         .route("/:slug", get(Routes::get_url))
@@ -26,6 +27,8 @@ async fn main() {
         .with_state(shared_state);
 
     let port = env::var("PORT").unwrap_or("3000".to_string());
+
+    info!("Starting server...");
 
     axum::Server::bind(
         &format!("0.0.0.0:{port}")

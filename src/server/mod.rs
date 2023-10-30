@@ -12,8 +12,8 @@ use axum::{
 use axum_garde::WithValidation;
 use garde::Validate;
 use nanoid::nanoid;
-use serde::{Deserialize, Serialize};
-use tracing::error;
+use serde::Deserialize;
+use tracing::{error, warn};
 
 use self::database::KVDatabase;
 
@@ -25,20 +25,15 @@ pub struct AppState {
 }
 
 impl AppState {
-    pub fn new() -> Result<AppState> {
+    pub fn new(redis_url: &str) -> Result<AppState> {
         Ok(AppState {
-            db: Arc::new(KVDatabase::new()?),
+            db: Arc::new(KVDatabase::new(redis_url)?),
         })
     }
 }
 
 impl axum::extract::FromRef<AppState> for () {
     fn from_ref(_: &AppState) {}
-}
-
-#[derive(Deserialize, Serialize)]
-struct URLStats {
-    total_accesses: u64,
 }
 
 #[derive(Deserialize, Validate)]
@@ -72,7 +67,11 @@ impl Routes {
         State(state): State<AppState>,
         WithValidation(path): WithValidation<Path<SlugPath>>,
     ) -> Response {
-        match state.db.get::<String, String>(&path.0) {
+        if let Err(err) = state.db.hincrby(&path.0, "stats", 1) {
+            warn!("get_url: {}", err); // This is not critical
+        }
+
+        match state.db.hget(&path.0, "url") {
             Ok(None) => Redirect::permanent("/").into_response(),
             Ok(Some(url)) => Redirect::permanent(&url).into_response(),
             Err(err) => {
@@ -87,7 +86,7 @@ impl Routes {
         WithValidation(path): WithValidation<Path<SlugPath>>,
         WithValidation(query): WithValidation<Query<KeyQuery>>,
     ) -> Response {
-        let key = match state.db.get::<String, String>(&format!("{}-key", path.0)) {
+        let key = match state.db.hget(&path.0, "key") {
             Ok(None) => return StatusCode::NOT_FOUND.into_response(),
             Ok(Some(key)) => key,
             Err(err) => {
@@ -99,10 +98,7 @@ impl Routes {
             return StatusCode::UNAUTHORIZED.into_response();
         }
 
-        match state
-            .db
-            .get::<String, URLStats>(&format!("{}-stats", path.0))
-        {
+        match state.db.hget(&path.0, "stats") {
             Ok(stats) => Json(stats).into_response(),
             Err(err) => {
                 error!("get_url_stats: {}", err);
@@ -119,13 +115,8 @@ impl Routes {
 
         match state
             .db
-            .put(&slug, &payload.url)
-            .and_then(|_| {
-                state
-                    .db
-                    .put(&format!("{}-stats", slug), &URLStats { total_accesses: 0 })
-            })
-            .and_then(|_| state.db.put(&format!("{}-key", slug), &payload.key))
+            .hset(&slug, "url", &payload.url)
+            .and_then(|_| state.db.hset(&slug, "key", &payload.key))
         {
             Ok(()) => (StatusCode::CREATED, slug).into_response(),
             Err(err) => {
@@ -141,7 +132,7 @@ impl Routes {
         WithValidation(query): WithValidation<Query<KeyQuery>>,
         WithValidation(payload): WithValidation<Json<UpdateURLBody>>,
     ) -> Response {
-        let key = match state.db.get::<String, String>(&format!("{}-key", path.0)) {
+        let key = match state.db.hget(&path.0, "key") {
             Ok(None) => return StatusCode::NOT_FOUND.into_response(),
             Ok(Some(key)) => key,
             Err(err) => {
@@ -153,10 +144,7 @@ impl Routes {
             return StatusCode::UNAUTHORIZED.into_response();
         }
 
-        match state
-            .db
-            .put::<String, String>(&format!("{}-key", path.0), &payload.key)
-        {
+        match state.db.hset(&path.0, "key", &payload.key) {
             Ok(()) => "Successfully update URL".into_response(),
             Err(err) => {
                 error!("update_url: {}", err);
@@ -170,7 +158,7 @@ impl Routes {
         WithValidation(path): WithValidation<Path<SlugPath>>,
         WithValidation(query): WithValidation<Query<KeyQuery>>,
     ) -> Response {
-        let key = match state.db.get::<String, String>(&format!("{}-key", path.0)) {
+        let key = match state.db.hget(&path.0, "key") {
             Ok(None) => return StatusCode::NOT_FOUND.into_response(),
             Ok(Some(key)) => key,
             Err(err) => {
@@ -182,7 +170,7 @@ impl Routes {
             return StatusCode::UNAUTHORIZED.into_response();
         }
 
-        match state.db.delete(&format!("{}-key", path.0)) {
+        match state.db.del(&path.0) {
             Ok(()) => "Successfully deleted URL".into_response(),
             Err(err) => {
                 error!("delete_url: {}", err);
