@@ -31,7 +31,7 @@ async fn main() {
     info!("Starting server...");
 
     axum::Server::bind(
-        &format!("0.0.0.0:{port}")
+        &format!("[::]:{port}")
             .parse()
             .expect("Could not parse address"),
     )
