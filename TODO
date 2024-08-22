@@ -1,0 +1,3 @@
+- Track more stats
+- Add automatic deletion if unused for 7 days (is it a good idea?)
+- Improve performance of operations when accessing Redis (multiple fields per query; connection pool)

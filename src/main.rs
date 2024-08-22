@@ -6,7 +6,6 @@ use axum::{
 };
 use server::{AppState, Routes};
 use std::env;
-use tracing::info;
 
 #[tokio::main]
 async fn main() {
@@ -28,8 +27,6 @@ async fn main() {
 
     let port = env::var("PORT").unwrap_or("3000".to_string());
 
-    info!("Starting server...");
-
     axum::Server::bind(
         &format!("[::]:{port}")
             .parse()
@@ -37,5 +34,5 @@ async fn main() {
     )
     .serve(app.into_make_service())
     .await
-    .unwrap();
+    .expect("The server stopped");
 }

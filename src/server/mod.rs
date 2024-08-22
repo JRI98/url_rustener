@@ -18,6 +18,7 @@ use tracing::{error, warn};
 use self::database::KVDatabase;
 
 const SLUG_LENGTH: usize = 21;
+const KEY_MAX_LENGTH: usize = 64;
 
 #[derive(Clone)]
 pub struct AppState {
@@ -41,13 +42,13 @@ pub struct SlugPath(#[garde(length(min=SLUG_LENGTH, max=SLUG_LENGTH))] String);
 
 #[derive(Deserialize, Validate)]
 pub struct KeyQuery {
-    #[garde(length(max = 32))]
+    #[garde(length(max = KEY_MAX_LENGTH))]
     key: String,
 }
 
 #[derive(Deserialize, Validate)]
 pub struct CreateURLBody {
-    #[garde(length(max = 32))]
+    #[garde(length(max = KEY_MAX_LENGTH))]
     key: String,
 
     #[garde(url)]
@@ -56,7 +57,7 @@ pub struct CreateURLBody {
 
 #[derive(Deserialize, Validate)]
 pub struct UpdateURLBody {
-    #[garde(length(max = 32))]
+    #[garde(length(max = KEY_MAX_LENGTH))]
     key: String,
 }
 
@@ -67,16 +68,17 @@ impl Routes {
         State(state): State<AppState>,
         WithValidation(path): WithValidation<Path<SlugPath>>,
     ) -> Response {
-        if let Err(err) = state.db.hincrby(&path.0, "stats", 1) {
-            warn!("get_url: {}", err); // This is not critical
-        }
-
         match state.db.hget(&path.0, "url") {
-            Ok(None) => Redirect::permanent("/").into_response(),
-            Ok(Some(url)) => Redirect::permanent(&url).into_response(),
+            Ok(Some(url)) => {
+                if let Err(err) = state.db.hincrby(&path.0, "total_accesses", 1) {
+                    warn!("get_url: {}", err); // This is not critical
+                }
+                Redirect::permanent(&url).into_response()
+            }
+            Ok(None) => StatusCode::NOT_FOUND.into_response(),
             Err(err) => {
                 error!("get_url: {}", err);
-                Redirect::permanent("/").into_response()
+                StatusCode::INTERNAL_SERVER_ERROR.into_response()
             }
         }
     }
@@ -87,8 +89,8 @@ impl Routes {
         WithValidation(query): WithValidation<Query<KeyQuery>>,
     ) -> Response {
         let key = match state.db.hget(&path.0, "key") {
-            Ok(None) => return StatusCode::NOT_FOUND.into_response(),
             Ok(Some(key)) => key,
+            Ok(None) => return StatusCode::NOT_FOUND.into_response(),
             Err(err) => {
                 error!("get_url_stats: {}", err);
                 return StatusCode::INTERNAL_SERVER_ERROR.into_response();
@@ -98,8 +100,9 @@ impl Routes {
             return StatusCode::UNAUTHORIZED.into_response();
         }
 
-        match state.db.hget(&path.0, "stats") {
-            Ok(stats) => Json(stats).into_response(),
+        match state.db.hget(&path.0, "total_accesses") {
+            Ok(Some(total_accesses)) => Json(total_accesses).into_response(),
+            Ok(None) => StatusCode::NOT_FOUND.into_response(),
             Err(err) => {
                 error!("get_url_stats: {}", err);
                 StatusCode::INTERNAL_SERVER_ERROR.into_response()
@@ -118,7 +121,7 @@ impl Routes {
             .hset(&slug, "url", &payload.url)
             .and_then(|_| state.db.hset(&slug, "key", &payload.key))
         {
-            Ok(()) => (StatusCode::CREATED, slug).into_response(),
+            Ok(_) => (StatusCode::CREATED, slug).into_response(),
             Err(err) => {
                 error!("create_url: {}", err);
                 StatusCode::INTERNAL_SERVER_ERROR.into_response()
@@ -133,8 +136,8 @@ impl Routes {
         WithValidation(payload): WithValidation<Json<UpdateURLBody>>,
     ) -> Response {
         let key = match state.db.hget(&path.0, "key") {
-            Ok(None) => return StatusCode::NOT_FOUND.into_response(),
             Ok(Some(key)) => key,
+            Ok(None) => return StatusCode::NOT_FOUND.into_response(),
             Err(err) => {
                 error!("update_url: {}", err);
                 return StatusCode::INTERNAL_SERVER_ERROR.into_response();
@@ -145,7 +148,7 @@ impl Routes {
         }
 
         match state.db.hset(&path.0, "key", &payload.key) {
-            Ok(()) => "Successfully update URL".into_response(),
+            Ok(_) => StatusCode::OK.into_response(),
             Err(err) => {
                 error!("update_url: {}", err);
                 StatusCode::INTERNAL_SERVER_ERROR.into_response()
@@ -159,8 +162,8 @@ impl Routes {
         WithValidation(query): WithValidation<Query<KeyQuery>>,
     ) -> Response {
         let key = match state.db.hget(&path.0, "key") {
-            Ok(None) => return StatusCode::NOT_FOUND.into_response(),
             Ok(Some(key)) => key,
+            Ok(None) => return StatusCode::NOT_FOUND.into_response(),
             Err(err) => {
                 error!("delete_url: {}", err);
                 return StatusCode::INTERNAL_SERVER_ERROR.into_response();
@@ -171,7 +174,7 @@ impl Routes {
         }
 
         match state.db.del(&path.0) {
-            Ok(()) => "Successfully deleted URL".into_response(),
+            Ok(_) => StatusCode::OK.into_response(),
             Err(err) => {
                 error!("delete_url: {}", err);
                 StatusCode::INTERNAL_SERVER_ERROR.into_response()
