@@ -36,7 +36,7 @@ impl KVDatabase {
             .get_connection()
             .context("Failed to get connection")?;
         connection
-            .hset(key, field, value)
+            .hset::<_, _, _, ()>(key, field, value)
             .context("Failed to hset")?;
 
         Ok(())
@@ -53,7 +53,7 @@ impl KVDatabase {
             .get_connection()
             .context("Failed to get connection")?;
         connection
-            .hincr(key, field, delta)
+            .hincr::<_, _, _, ()>(key, field, delta)
             .context("Failed to hincrby")?;
 
         Ok(())
@@ -64,7 +64,7 @@ impl KVDatabase {
             .database
             .get_connection()
             .context("Failed to get connection")?;
-        connection.del(key).context("Failed to del key")?;
+        connection.del::<_, ()>(key).context("Failed to del key")?;
 
         Ok(())
     }
